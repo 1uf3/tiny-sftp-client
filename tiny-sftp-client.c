@@ -6,7 +6,7 @@
  *
  * Run it like this:
  *
- * $ ./ssh2_exec 127.0.0.1 user password "uptime"
+ * $ ./ssh2_ftp 127.0.0.1 22 user password 
  *
  */ 
  
@@ -221,11 +221,9 @@ int main(int argc, char *argv[]) {
     int type;
 
     switch(argc) {
-        // 1 is default.
+        /* 1 is default. */
         case 1:
             break;
-        case 6:
-            commandline = argv[5];
         case 5:
             password = argv[4];
         case 4:
@@ -235,7 +233,7 @@ int main(int argc, char *argv[]) {
         case 2:
             hostname = argv[1];
             break;
-        // default is error
+        /* default is error */
         default:
             fprintf(stdout, "argument should have 1 to 5. now (%d)", argc);
             return 1;
