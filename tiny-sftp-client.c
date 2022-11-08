@@ -26,8 +26,92 @@
 #include <errno.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdbool.h>
+#include <termios.h>
 
-#define STORAGE "/tmp/sftp-storage" 
+void get_password(char *password) {
+    struct termios oflags, nflags;
+    int len;
+
+    /* disabling echo */
+    tcgetattr(fileno(stdin), &oflags);
+    nflags = oflags;
+    nflags.c_lflag &= ~ECHO;
+    nflags.c_lflag |= ECHONL;
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("ENTER PASSWORD : ");
+    fgets(password, sizeof(password), stdin);
+    len = strlen(password);
+    if(password[len-1] == '\n') {
+        password[strlen(password) - 1] = '\0';
+    }
+
+    /* restore terminal */
+    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    return;
+}
+
+typedef struct {
+    bool ip:true;
+    bool port:true;
+    bool user:true;
+    bool password:true;
+    bool no_options:true;
+} options;
+
+/* default config */
+typedef struct {
+    char ip[16];
+    int  port;
+    char username[256];
+    char password[256];
+} config;
+
+int parse_options(options *opts, config *cfg, int argc, char **argv) {
+    int opt;
+
+    while((opt = getopt(argc, argv, "hipuw")) != -1) {
+        switch(opt) {
+            case 'h':
+                puts("TODO HELP INFORMATION");
+                return 1;
+            case 'i':
+//                 opts->ip = true;
+                break;
+                memcpy(cfg->ip, optarg, sizeof(cfg->ip));
+            case 'p':
+//                 opts->port = true;
+                cfg->port = atoi(optarg);
+                break;
+            case 'u':
+//                 opts->user = true;
+                memcpy(cfg->username, optarg, sizeof(cfg->username));
+                break;
+            case 'w':
+//                 opts->password = true;
+                if (optarg == NULL || optarg[0] == '-') {
+                    get_password(cfg->password);
+                } else {
+                    memcpy(cfg->password, optarg, sizeof(cfg->password));
+                }
+                break;
+            /* error used undefined option. */
+            default:
+                printf("Try 'sftp -h' for more infromation");
+                return -1;
+        }
+    }
+    return 0;
+}
 
 static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
 
@@ -59,6 +143,8 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
  
     return rc;
 }
+
+#define STORAGE "/tmp/sftp-storage" 
 
 /* Request a file via SFTP */ 
 int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
@@ -200,13 +286,7 @@ int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
 }
  
  
-int main(int argc, char *argv[]) {
-
-    const char *hostname = "127.0.0.1";
-    int  port = 22;
-    const char *commandline = "uptime";
-    const char *username    = "user";
-    const char *password    = "password";
+int main(int argc, char **argv) {
 
     unsigned long hostaddr;
     int sock;
@@ -220,25 +300,26 @@ int main(int argc, char *argv[]) {
     LIBSSH2_KNOWNHOSTS *nh;
     int type;
 
-    switch(argc) {
-        /* 1 is default. */
-        case 1:
-            break;
-        case 5:
-            password = argv[4];
-        case 4:
-            username = argv[3];
-        case 3:
-            port = atoi(argv[2]);
-        case 2:
-            hostname = argv[1];
-            break;
-        /* default is error */
-        default:
-            fprintf(stdout, "argument should have 1 to 5. now (%d)", argc);
-            return 1;
+    options opts = {};
+
+    /* 
+     * maximum password length is defined in Linux 
+     * in this program, define maximum password length is 256.
+     */
+    config cfg = {
+        "127.0.0.1",
+        22,
+        "user",
+        "password"
+    };
+
+
+    if (argc == 2 && argv[1][0] != '-') {
+        opts.no_options = true;
+    } else {
+        parse_options(&opts, &cfg, argc, argv);
     }
- 
+    
     rc = libssh2_init(0);
 
     if(rc != 0) {
@@ -247,10 +328,10 @@ int main(int argc, char *argv[]) {
     }
  
     sock = socket(AF_INET, SOCK_STREAM, 0);
-    hostaddr = inet_addr(hostname);
+    hostaddr = inet_addr(cfg.ip);
 
     sin.sin_family = AF_INET;
-    sin.sin_port = htons(port);
+    sin.sin_port = htons(cfg.port);
     sin.sin_addr.s_addr = hostaddr;
 
     if(connect(sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
@@ -301,8 +382,8 @@ int main(int argc, char *argv[]) {
 #if LIBSSH2_VERSION_NUM >= 0x010206
     /* introduced in 1.2.6 */ 
     int check = libssh2_knownhost_checkp(nh, 
-                                          hostname, 
-                                          port, 
+                                          cfg.ip, 
+                                          cfg.port, 
                                           fingerprint, 
                                           len,
                                           LIBSSH2_KNOWNHOST_TYPE_PLAIN|
@@ -311,7 +392,7 @@ int main(int argc, char *argv[]) {
 #else
     /* 1.2.5 or older */ 
     int check = libssh2_knownhost_check(nh, 
-                                         hostname,
+                                         cfg.ip,
                                          fingerprint, 
                                          len,
                                          LIBSSH2_KNOWNHOST_TYPE_PLAIN|
@@ -325,11 +406,11 @@ int main(int argc, char *argv[]) {
 
     libssh2_knownhost_free(nh);
  
-    if(strlen(password) != 0) {
+    if(strlen(cfg.password) != 0) {
         /* We could authenticate via password */ 
         while((rc = libssh2_userauth_password(session, 
-                                               username, 
-                                               password)) 
+                                               cfg.username, 
+                                               cfg.password)) 
                                                 == LIBSSH2_ERROR_EAGAIN);
 
         if(rc) {
@@ -340,12 +421,12 @@ int main(int argc, char *argv[]) {
     } else {
         /* Or by public key */ 
         while((rc = libssh2_userauth_publickey_fromfile(session, 
-                                                         username,
+                                                         cfg.username,
                                                          "/home/user/"
                                                          ".ssh/id_rsa.pub",
                                                          "/home/user/"
                                                          ".ssh/id_rsa",
-                                                         password)) 
+                                                         cfg.password)) 
                                                           == LIBSSH2_ERROR_EAGAIN);
 
         if(rc) {
