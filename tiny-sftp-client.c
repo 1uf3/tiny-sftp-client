@@ -133,6 +133,7 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
 }
 
 int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
+
     LIBSSH2_SFTP_HANDLE *sftp_handle; 
     FILE *tempstorage;
 
@@ -364,8 +365,34 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* tiny-client-shell 
+     *
+     * need to prepare null byte and except other one.
+     * so take 5 byte
+     */
+    char input[5];
 
-    puts("all passed!");
+    while(fgets(input, sizeof(input), stdin) != NULL) {
+
+        if (sizeof(input)-1 <= strlen(input)) {
+            continue;
+        }
+
+        if (input[strlen(input)-1] == '\n') {
+            input[strlen(input)-1] = '\0';
+        }
+
+        if (strncmp(input, "DWN", 3) == 0 ) {
+            download_file(session, sftp_session, sock, destfile);
+        }
+        if (strncmp(input, "UPL", 3) == 0 ) {
+            upload_file(sftp_sesion, sock, destfile);
+        }
+        if (strncmp(input, "EXT", 3) == 0 ) {
+            goto shutdown;
+        }
+        printf("ssc > ");
+    }
 
  
 shutdown:
