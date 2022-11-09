@@ -77,7 +77,7 @@ typedef struct {
 } config;
 
 int parse_options(options *opts, config *cfg, int argc, char **argv) {
-    int opt;
+    int opt, err;
 
     while((opt = getopt(argc, argv, "hipuw")) != -1) {
         switch(opt) {
@@ -86,22 +86,24 @@ int parse_options(options *opts, config *cfg, int argc, char **argv) {
                 return 1;
             case 'i':
 //                 opts->ip = true;
+                strncpy(cfg->ip, optarg, 16);
                 break;
-                memcpy(cfg->ip, optarg, sizeof(cfg->ip));
             case 'p':
 //                 opts->port = true;
                 cfg->port = atoi(optarg);
                 break;
             case 'u':
 //                 opts->user = true;
-                memcpy(cfg->username, optarg, sizeof(cfg->username));
+                strncpy(cfg->username, optarg, 256);
+                puts("BEBUG");
+                exit(1);
                 break;
             case 'w':
 //                 opts->password = true;
                 if (optarg == NULL || optarg[0] == '-') {
                     get_password(cfg->password);
                 } else {
-                    memcpy(cfg->password, optarg, sizeof(cfg->password));
+                    strncpy(cfg->password, optarg, 256);
                 }
                 break;
             /* error used undefined option. */
@@ -319,6 +321,8 @@ int main(int argc, char **argv) {
     } else {
         parse_options(&opts, &cfg, argc, argv);
     }
+    puts("BEBUG");
+    exit(1);
     
     rc = libssh2_init(0);
 
