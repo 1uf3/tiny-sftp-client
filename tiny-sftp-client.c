@@ -1,9 +1,4 @@
 /*
- * Sample showing how to use libssh2 to execute a command remotely.
- *
- * The sample code has fixed values for host name, user name, password
- * and command to run.
- *
  * Run it like this:
  *
  * $ ./ssh2_ftp 127.0.0.1 22 user password 
@@ -27,7 +22,7 @@
 #include <stdio.h>
 #include <ctype.h>
 
-#define STORAGE "/tmp/sftp-storage" 
+#define STORAGE "/tmp" 
 
 static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
 
@@ -60,7 +55,7 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
     return rc;
 }
 
-/* Request a file via SFTP */ 
+/* Download a file via SFTP */ 
 int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
 
     LIBSSH2_SFTP_HANDLE *sftp_handle; 
@@ -71,7 +66,6 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
     if(!tempstorage) {
         fprintf(stderr, "can't open %s for reading\n", STORAGE);
         return -1;
-        // goto shutdown;
     }
     
     while(!(sftp_handle = 
@@ -79,7 +73,6 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
         if(libssh2_session_last_errno(session) != LIBSSH2_ERROR_EAGAIN) {
             fprintf(stderr, "Unable to open file with SFTP\n");
             return -1;
-            // goto shutdown;
         }
 
         fprintf(stdout, "non-blocking open\n");
@@ -96,7 +89,7 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
 
     while(1) {
 
-        /* read in a loop until we block */ 
+        /* get a file from sever to local */
         while((rc = libssh2_sftp_read(sftp_handle, mem, sizeof(mem))) > 0) {
             /* write to stderr */ 
             write(2, mem, rc);
@@ -132,6 +125,7 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
     return 0;
 }
 
+/* Upload a file via SFTP */ 
 int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
 
     LIBSSH2_SFTP_HANDLE *sftp_handle; 
@@ -365,10 +359,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* tiny-client-shell 
+    /* tiny shell 
      *
      * need to prepare null byte and except other one.
      * so take 5 byte
+     */
+
+    /*
+     * want to upgrade this content for add any control.
      */
     char input[5];
 
