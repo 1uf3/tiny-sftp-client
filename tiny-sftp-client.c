@@ -22,7 +22,13 @@
 #include <stdio.h>
 #include <ctype.h>
 
-#define STORAGE "/tmp" 
+/*
+ * On Linux: The maximum length for a file name is 255 bytes.
+ * The maximum combined length of both the file name and path
+ * name is 4096 bytes. This length matches the PATH_MAX that 
+ * is supported by the operating system.
+ */
+#define MAX_PATH 4096
 
 static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
 
@@ -55,31 +61,75 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
     return rc;
 }
 
+/* 
+ * get spath and dpath 
+ */
+int sdfilename(char *remote, char *local, char *type) {
+    char tmp[MAX_PATH];
+
+    puts("remote file path need to write full path.");
+
+    printf("ssc %s > ENTER remote filename : ", type);
+    fgets(tmp, sizeof(tmp), stdin);
+    if(tmp[strlen(tmp)-1] == '\n') {
+        tmp[strlen(tmp)-1] = '\0';
+    }
+    memcpy(remote, tmp, sizeof(tmp));
+
+    memset(tmp, 0, sizeof(tmp));
+
+    printf("ssc %s > ENTER local filename : ", type);
+    fgets(tmp, sizeof(tmp), stdin);
+    if(tmp[strlen(tmp)-1] == '\n') {
+        tmp[strlen(tmp)-1] = '\0';
+    } 
+
+    if(tmp[0] == '/') {
+        memcpy(local, tmp, sizeof(tmp));
+    } else {
+        if(strlen(tmp) + strlen(local) >= MAX_PATH) {
+            fprintf(stderr, "path is over 4096 byte.");
+            exit(-1);
+        }
+
+        strncat(local, "/", sizeof("/"));
+        strncat(local, tmp, strlen(tmp));
+    }
+
+    memset(tmp, 0, sizeof(tmp));
+    return 0;
+}
+
 /* Download a file via SFTP */ 
-int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
+int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock) {
 
     LIBSSH2_SFTP_HANDLE *sftp_handle; 
-    FILE *tempstorage;
-    const char *sftppath = "/tmp/TEST";
+    char spath[MAX_PATH] = "/tmp";
+    char dpath[MAX_PATH];
+    FILE *fp;
 
-    tempstorage = fopen(STORAGE, "rb");
-    if(!tempstorage) {
-        fprintf(stderr, "can't open %s for reading\n", STORAGE);
+    /* initialize spath */
+    getcwd(dpath, MAX_PATH);
+    sdfilename(spath, dpath, "DWN");
+
+    fp = fopen(dpath, "ab+");
+    if(!fp) {
+        fprintf(stderr, "can't open %s for reading\n", dpath);
         return -1;
     }
     
     while(!(sftp_handle = 
-                libssh2_sftp_open(sftp_session, sftppath, LIBSSH2_FXF_READ, 0))) {
+                libssh2_sftp_open(sftp_session, spath, LIBSSH2_FXF_READ, 0))) {
         if(libssh2_session_last_errno(session) != LIBSSH2_ERROR_EAGAIN) {
             fprintf(stderr, "Unable to open file with SFTP\n");
             return -1;
         }
 
-        fprintf(stdout, "non-blocking open\n");
+        puts("non-blocking open");
         waitsocket(sock, session);  
     }
 
-    fprintf(stdout, "libssh2_sftp_open() is done, now receive data!\n");
+    puts("libssh2_sftp_open() is done, now receive data!");
 
     int rc;
     char mem[1000];
@@ -94,7 +144,7 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
             /* write to stderr */ 
             write(2, mem, rc);
             /* write to temporary storage area */ 
-            fwrite(mem, rc, 1, tempstorage);
+            fwrite(mem, rc, 1, fp);
         }
 
         /* error or end of file */ 
@@ -121,29 +171,35 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
     }
 
     libssh2_sftp_close(sftp_handle);
-    fclose(tempstorage);
+    fclose(fp);
     return 0;
 }
 
 /* Upload a file via SFTP */ 
-int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
+int upload_file(LIBSSH2_SFTP *sftp_session, int sock) {
 
     LIBSSH2_SFTP_HANDLE *sftp_handle; 
-    FILE *tempstorage;
+    char spath[MAX_PATH] = "/tmp";
+    char dpath[MAX_PATH];
+    FILE *fp;
 
-    tempstorage = fopen(STORAGE, "rb");
-    if(!tempstorage) {
-        fprintf(stderr, "can't open %s for reading\n", STORAGE);
+    /* initialize spath */
+    getcwd(spath, MAX_PATH);
+    sdfilename(dpath, spath, "UPD");
+
+    fp = fopen(spath, "rb");
+    if(!fp) {
+        fprintf(stderr, "can't open %s for reading\n", spath);
         return -1;
         // goto shutdown;
     }
 
-    sftp_handle = libssh2_sftp_open(sftp_session, dest,
+    sftp_handle = libssh2_sftp_open(sftp_session, dpath,
             LIBSSH2_FXF_WRITE|LIBSSH2_FXF_CREAT,
             LIBSSH2_SFTP_S_IRUSR|LIBSSH2_SFTP_S_IWUSR|
             LIBSSH2_SFTP_S_IRGRP|LIBSSH2_SFTP_S_IROTH);
     if(!sftp_handle) {
-        fprintf(stderr, "SFTP failed to open destination path: %s\n", dest);
+        fprintf(stderr, "SFTP failed to open destination path: %s\n", dpath);
         return -1;
     }
 
@@ -155,12 +211,11 @@ int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
     fd_set fd;
     fd_set fd2;
 
-    while ((nread = fread(mem, 1, sizeof(mem), tempstorage)) >= 0) {
+    while ((nread = fread(mem, 1, sizeof(mem), fp)) > 0) {
         ptr = mem;
 
         /* write data in a loop until we block */ 
-        while((rc = libssh2_sftp_write(sftp_handle, ptr, nread)) >= 0) {
-            rc = libssh2_sftp_write(sftp_handle, ptr, nread);
+        while((rc = libssh2_sftp_write(sftp_handle, ptr, nread)) > 0) {
             ptr += rc;
             nread -= nread;
         }
@@ -187,10 +242,10 @@ int upload_file(LIBSSH2_SFTP *sftp_session, int sock ,const char *dest) {
         }
 
     }
-    fprintf(stdout, "SFTP upload done!\n");
+    puts("SFTP upload done!");
 
     libssh2_sftp_close(sftp_handle);
-    fclose(tempstorage);
+    fclose(fp);
     return 0;
 }
  
@@ -230,7 +285,7 @@ int main(int argc, char *argv[]) {
             break;
         /* default is error */
         default:
-            fprintf(stdout, "argument should have 1 to 5. now (%d)", argc);
+            fprintf(stderr, "argument should have 1 to 5. now (%d)", argc);
             return 1;
     }
  
@@ -319,39 +374,22 @@ int main(int argc, char *argv[]) {
             host->key:"<none>");
 
     libssh2_knownhost_free(nh);
- 
-    if(strlen(password) != 0) {
-        /* We could authenticate via password */ 
-        while((rc = libssh2_userauth_password(session, 
-                                               username, 
-                                               password)) 
-                                                == LIBSSH2_ERROR_EAGAIN);
 
-        if(rc) {
-            fprintf(stderr, "Authentication by password failed.\n");
-            goto shutdown;
-        }
+    /* authenticate via password */ 
+    while((rc = libssh2_userauth_password(session, 
+                    username, 
+                    password)) 
+            == LIBSSH2_ERROR_EAGAIN);
 
-    } else {
-        /* Or by public key */ 
-        while((rc = libssh2_userauth_publickey_fromfile(session, 
-                                                         username,
-                                                         "/home/user/"
-                                                         ".ssh/id_rsa.pub",
-                                                         "/home/user/"
-                                                         ".ssh/id_rsa",
-                                                         password)) 
-                                                          == LIBSSH2_ERROR_EAGAIN);
-
-        if(rc) {
-            fprintf(stderr, "\tAuthentication by public key failed\n");
-            goto shutdown;
-        }
+    if(rc) {
+        fprintf(stderr, "Authentication by password failed.\n");
+        goto shutdown;
     }
- 
+
+
     while(!(sftp_session = libssh2_sftp_init(session))) {
         if(libssh2_session_last_errno(session) == LIBSSH2_ERROR_EAGAIN) {
-            fprintf(stderr, "non-blocking init\n");
+            puts("non-blocking init");
             waitsocket(sock, session); /* now we wait */ 
         } else {
             fprintf(stderr, "Unable to init SFTP session\n");
@@ -368,7 +406,7 @@ int main(int argc, char *argv[]) {
     /*
      * want to upgrade this content for add any control.
      */
-    char input[5];
+    char input[10];
 
     while(fgets(input, sizeof(input), stdin) != NULL) {
 
@@ -381,15 +419,18 @@ int main(int argc, char *argv[]) {
         }
 
         if (strncmp(input, "DWN", 3) == 0 ) {
-            download_file(session, sftp_session, sock, destfile);
+            puts("DEBUG > downloading!");
+            download_file(session, sftp_session, sock);
         }
-        if (strncmp(input, "UPL", 3) == 0 ) {
-            upload_file(sftp_sesion, sock, destfile);
+        if (strncmp(input, "UPD", 3) == 0 ) {
+            puts("DEBUG > uploading!");
+            upload_file(sftp_session, sock);
         }
         if (strncmp(input, "EXT", 3) == 0 ) {
             goto shutdown;
         }
         printf("ssc > ");
+        rewind(stdin);
     }
 
  
@@ -397,7 +438,7 @@ shutdown:
     libssh2_session_disconnect(session,"Normal Shutdown, Thank you for using");
     libssh2_session_free(session);
     close(sock);
-    fprintf(stderr, "all done\n");
     libssh2_exit();
+    puts("all done");
     return 0;
 }
