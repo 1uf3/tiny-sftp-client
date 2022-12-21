@@ -30,14 +30,13 @@
  */
 #define MAX_PATH 4096
 
-static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
+static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
 
     struct timeval timeout;
-    int rc;
+    int rc, dir;
     fd_set fd;
-    fd_set *writefd = NULL;
-    fd_set *readfd = NULL;
-    int dir;
+    fd_set* writefd = NULL;
+    fd_set* readfd = NULL;
  
     timeout.tv_sec = 10;
     timeout.tv_usec = 0;
@@ -64,7 +63,7 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION *session) {
 /* 
  * get spath and dpath 
  */
-int sdfilename(char *remote, char *local, char *type) {
+int sdfilename(char* remote, char* local, char* type) {
     char tmp[MAX_PATH];
 
     puts("remote file path need to write full path.");
@@ -75,7 +74,6 @@ int sdfilename(char *remote, char *local, char *type) {
         tmp[strlen(tmp)-1] = '\0';
     }
     memcpy(remote, tmp, sizeof(tmp));
-
     memset(tmp, 0, sizeof(tmp));
 
     printf("ssc %s > ENTER local filename : ", type);
@@ -101,12 +99,12 @@ int sdfilename(char *remote, char *local, char *type) {
 }
 
 /* Download a file via SFTP */ 
-int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock) {
+int download_file(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock) {
 
-    LIBSSH2_SFTP_HANDLE *sftp_handle; 
+    LIBSSH2_SFTP_HANDLE* sftp_handle; 
     char spath[MAX_PATH] = "/tmp";
     char dpath[MAX_PATH];
-    FILE *fp;
+    FILE* fp;
 
     /* initialize spath */
     getcwd(dpath, MAX_PATH);
@@ -176,12 +174,12 @@ int download_file(LIBSSH2_SESSION *session, LIBSSH2_SFTP *sftp_session, int sock
 }
 
 /* Upload a file via SFTP */ 
-int upload_file(LIBSSH2_SFTP *sftp_session, int sock) {
+int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
 
-    LIBSSH2_SFTP_HANDLE *sftp_handle; 
+    LIBSSH2_SFTP_HANDLE* sftp_handle; 
     char spath[MAX_PATH] = "/tmp";
     char dpath[MAX_PATH];
-    FILE *fp;
+    FILE* fp;
 
     /* initialize spath */
     getcwd(spath, MAX_PATH);
@@ -206,10 +204,9 @@ int upload_file(LIBSSH2_SFTP *sftp_session, int sock) {
     int rc;
     size_t nread;
     char mem[1000];
-    char *ptr;
+    char* ptr;
     struct timeval timeout;
-    fd_set fd;
-    fd_set fd2;
+    fd_set fd, fd2;
 
     while ((nread = fread(mem, 1, sizeof(mem), fp)) > 0) {
         ptr = mem;
@@ -250,25 +247,23 @@ int upload_file(LIBSSH2_SFTP *sftp_session, int sock) {
 }
  
  
-int main(int argc, char *argv[]) {
+int main(int argc, char** argv) {
 
-    const char *hostname = "127.0.0.1";
-    int  port = 22;
-    const char *commandline = "uptime";
-    const char *username    = "user";
-    const char *password    = "password";
+    const char* hostname = "127.0.0.1";
+    int port = 22;
+    const char* commandline = "uptime";
+    const char* username    = "user";
+    const char* password    = "password";
 
     unsigned long hostaddr;
-    int sock;
+    int sock, rc, type;
     struct sockaddr_in sin;
-    const char *fingerprint;
-    LIBSSH2_SESSION *session;
-    LIBSSH2_SFTP *sftp_session;
-    int rc;
+    const char* fingerprint;
+    LIBSSH2_SESSION* session;
+    LIBSSH2_SFTP* sftp_session;
     int bytecount = 0;
     size_t len;
-    LIBSSH2_KNOWNHOSTS *nh;
-    int type;
+    LIBSSH2_KNOWNHOSTS* nh;
 
     switch(argc) {
         /* 1 is default. */
@@ -347,7 +342,7 @@ int main(int argc, char *argv[]) {
      * At this point, we could verify that 'check' tells us the key is
      * fine or bail out.
      *****/ 
-    struct libssh2_knownhost *host;
+    struct libssh2_knownhost* host;
 #if LIBSSH2_VERSION_NUM >= 0x010206
     /* introduced in 1.2.6 */ 
     int check = libssh2_knownhost_checkp(nh, 
