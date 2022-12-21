@@ -1,7 +1,6 @@
 /*
  * Run it like this:
- *
- * $ ./ssh2_ftp 127.0.0.1 22 user password 
+ * $ ./ssh2_ftp -h 127.0.0.1 -p 22 -u user -P password 
  *
  */ 
  
@@ -16,11 +15,13 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <termios.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <getopt.h>
 
 /*
  * On Linux: The maximum length for a file name is 255 bytes.
@@ -29,6 +30,188 @@
  * is supported by the operating system.
  */
 #define MAX_PATH 4096
+#define OPTSTRING "h:p:u:P::"
+
+typedef struct {
+    char* hostname;
+    int*  port;
+    char* username;
+    char* password;
+} data_t;
+
+static struct option long_options[] = {
+    {"hostname", required_argument, NULL, 'h'},
+    {"port", required_argument, NULL, 'p'},
+    {"username", required_argument, NULL, 'u'},
+    {"password", optional_argument, NULL, 'P'},
+    {"help", optional_argument, NULL, 'H'},
+    {NULL, 0, NULL, 0}
+};
+
+int parse_opts(data_t*, int, char**);
+static int waitsocket(int, LIBSSH2_SESSION*);
+int sdfilename(char*, char*, char*);
+int download_file(LIBSSH2_SESSION*, LIBSSH2_SFTP*, int);
+int upload_file(LIBSSH2_SFTP*, int);
+char* input_password(data_t*);
+int shell(LIBSSH2_SESSION*, LIBSSH2_SFTP*, int);
+
+int main(int argc, char** argv) {
+    unsigned long hostaddr;
+    int sock, type, rc;
+    struct sockaddr_in sin;
+    const char* fingerprint;
+    LIBSSH2_SESSION *session;
+    LIBSSH2_SFTP* sftp_session;
+    LIBSSH2_KNOWNHOSTS* nh;
+    int bytecount = 0;
+    size_t len;
+    data_t* d;
+
+    d = (data_t*)calloc(1, sizeof(data_t));
+    if(d == NULL) {
+        fprintf(stderr, "Failed to malloc struct data_t area\n");
+        return -1;
+    }
+
+    if(parse_opts(d, argc, argv) == -1) {
+        puts("Try 'sftp --help' for more information.");
+        return -1;
+    }
+
+    printf("Now you logging in : %s\n", d->username);
+    if(d->password == NULL) {
+        input_password(d);
+    }
+
+    puts("=== debug ===");
+    printf("hostname: %s\n",d->hostname);
+    printf("port: %d\n",*d->port);
+    printf("username: %s\n",d->username);
+    printf("password: %s\n",d->password);
+    puts("=============");
+
+    rc = libssh2_init(0);
+    if(rc != 0) {
+        fprintf(stderr, "libssh2 initialization failed (%d)\n", rc);
+        return 1;
+    }
+ 
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    hostaddr = inet_addr(d->hostname);
+
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons(*d->port);
+    sin.sin_addr.s_addr = hostaddr;
+
+    if(connect(sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
+        fprintf(stderr, "failed to connect!\n");
+        return -1;
+    }
+ 
+    /* Create a session instance */ 
+    session = libssh2_session_init();
+    if(!session) {
+        return -1;
+    }
+ 
+    /* tell libssh2 we want it all done non-blocking */ 
+    libssh2_session_set_blocking(session, sock);
+
+    /* ... start it up. This will trade welcome banners, exchange keys,
+     * and setup crypto, compression, and MAC layers
+     */ 
+    while((rc = libssh2_session_handshake(session, sock)) == LIBSSH2_ERROR_EAGAIN);
+    if(rc) {
+        fprintf(stderr, "Failure establishing SSH session: %d\n", rc);
+        return -1;
+    }
+ 
+    nh = libssh2_knownhost_init(session);
+    if(!nh) {
+        return 2;
+    }
+ 
+    /* read all hosts from here */ 
+    libssh2_knownhost_readfile(nh, "known_hosts", LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+ 
+    /* store all known hosts to here */ 
+    libssh2_knownhost_writefile(nh, "dump-known_hosts", LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+ 
+    fingerprint = libssh2_session_hostkey(session, &len, &type);
+
+    if(!fingerprint) {
+        return 3;
+    }
+
+    /*****
+     * At this point, we could verify that 'check' tells us the key is
+     * fine or bail out.
+     *****/ 
+    struct libssh2_knownhost *host;
+#if LIBSSH2_VERSION_NUM >= 0x010206
+    /* introduced in 1.2.6 */ 
+    int check = libssh2_knownhost_checkp(nh, 
+                                          d->hostname, 
+                                          *d->port, 
+                                          fingerprint, 
+                                          len,
+                                          LIBSSH2_KNOWNHOST_TYPE_PLAIN|
+                                          LIBSSH2_KNOWNHOST_KEYENC_RAW,
+                                          &host);
+#else
+    /* 1.2.5 or older */ 
+    int check = libssh2_knownhost_check(nh, 
+                                         d->hostname,
+                                         fingerprint, 
+                                         len,
+                                         LIBSSH2_KNOWNHOST_TYPE_PLAIN|
+                                         LIBSSH2_KNOWNHOST_KEYENC_RAW,
+                                         &host);
+#endif
+
+    fprintf(stderr, "Host check: %d, key: %s\n", check,
+            (check <= LIBSSH2_KNOWNHOST_CHECK_MISMATCH)?
+            host->key:"<none>");
+
+    libssh2_knownhost_free(nh);
+
+    /* authenticate via password */ 
+    while((rc = libssh2_userauth_password(session, 
+                    d->username, 
+                    d->password)) 
+            == LIBSSH2_ERROR_EAGAIN);
+
+    if(rc) {
+        fprintf(stderr, "Authentication by password failed.\n");
+        goto shutdown;
+    }
+
+    while(!(sftp_session = libssh2_sftp_init(session))) {
+        if(libssh2_session_last_errno(session) == LIBSSH2_ERROR_EAGAIN) {
+            puts("non-blocking init");
+            waitsocket(sock, session); /* now we wait */ 
+        } else {
+            fprintf(stderr, "Unable to init SFTP session\n");
+            goto shutdown;
+        }
+    }
+
+    shell(session, sftp_session, sock);
+
+shutdown:
+    libssh2_session_disconnect(session,"Normal Shutdown, Thank you for using");
+    libssh2_session_free(session);
+    close(sock);
+    libssh2_exit();
+//     free(d->hostname);
+//     free(d->port);
+//     free(d->username);
+    free(d->password);
+    free(d);
+    puts("all done");
+    return 0;
+}
 
 static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
 
@@ -60,59 +243,10 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
     return rc;
 }
 
-/*
- * password acceptable length max 256.
- */
-char* input_password() {
-    struct termios oflags, nflags;
-    char tmp[256];
-
-    /* disabling echo */
-    tcgetattr(fileno(stdin), &oflags);
-    nflags = oflags;
-    nflags.c_lflag &= ~ECHO;
-    nflags.c_lflag |= ECHONL;
-
-    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    printf("INPUT PASSWORD : ");
-    while(fgets(tmp, sizeof(tmp), stdin)) {
-        if (strlen(tmp) > 1) {
-            break;
-        }
-    }
-
-    if (tmp[strlen(tmp)-1] == '\n') {
-        tmp[strlen(tmp)-1] = '\0';
-    }
-
-    password = (char*)calloc(strlen(tmp)+1, sizeof(char));
-    if (password == NULL) {
-        return NULL;
-    }
-
-    memcpy(password, tmp, strlen(tmp)+1);
-
-    /* restore terminal */
-    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    return password;
-}
-
-/* 
- * get spath and dpath 
- */
 int sdfilename(char* remote, char* local, char* type) {
     char tmp[MAX_PATH];
 
     puts("remote file path need to write full path.");
-
     printf("ssc %s > ENTER remote filename : ", type);
     fgets(tmp, sizeof(tmp), stdin);
     if(tmp[strlen(tmp)-1] == '\n') {
@@ -210,7 +344,6 @@ int download_file(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock
             fprintf(stderr, "SFTP download timed out: %d\n", rc);
             break;
         }
-
     }
 
     libssh2_sftp_close(sftp_handle);
@@ -290,8 +423,53 @@ int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
     fclose(fp);
     return 0;
 }
- 
-/* tiny shell
+
+/*
+ * password acceptable length max 256.
+ */
+char* input_password(data_t* d) {
+    struct termios oflags, nflags;
+    char tmp[256];
+
+    /* disabling echo */
+    tcgetattr(fileno(stdin), &oflags);
+    nflags = oflags;
+    nflags.c_lflag &= ~ECHO;
+    nflags.c_lflag |= ECHONL;
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("INPUT PASSWORD : ");
+    while(fgets(tmp, sizeof(tmp), stdin)) {
+        if (strlen(tmp) > 1) {
+            break;
+        }
+    }
+
+    if (tmp[strlen(tmp)-1] == '\n') {
+        tmp[strlen(tmp)-1] = '\0';
+    }
+
+    d->password = (char*)calloc(strlen(tmp)+1, sizeof(char));
+    if (d->password == NULL) {
+        return NULL;
+    }
+
+    memcpy(d->password, tmp, strlen(tmp)+1);
+
+    /* restore terminal */
+    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    return d->password;
+}
+
+/* tiny shell 
  *
  * need to prepare null byte and except other one.
  * so take 5 byte
@@ -326,161 +504,60 @@ int shell(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock) {
         rewind(stdin);
     }
 }
- 
-int main(int argc, char** argv) {
 
-    const char* hostname = "127.0.0.1";
-    int port = 22;
-    const char* commandline = "uptime";
-    const char* username    = "user";
-    const char* password    = "password";
+int parse_opts(data_t* d, int argc, char** argv) {
+    int c, option_index;
 
-    unsigned long hostaddr;
-    int sock, rc, type;
-    struct sockaddr_in sin;
-    const char* fingerprint;
-    LIBSSH2_SESSION* session;
-    LIBSSH2_SFTP* sftp_session;
-    int bytecount = 0;
-    size_t len;
-    LIBSSH2_KNOWNHOSTS* nh;
+    while (1) {
+        option_index = 0;
 
-    switch(argc) {
-        /* 1 is default. */
-        case 1:
+        if ((c = getopt_long(argc, argv, OPTSTRING, long_options,
+                        &option_index)) == -1) {
             break;
-        case 5:
-            password = argv[4];
-        case 4:
-            username = argv[3];
-        case 3:
-            port = atoi(argv[2]);
-        case 2:
-            hostname = argv[1];
-            break;
-        /* default is error */
-        default:
-            fprintf(stderr, "argument should have 1 to 5. now (%d)", argc);
-            return 1;
-    }
+        }
 
-    char* password = input_password()
- 
-    rc = libssh2_init(0);
+        switch (c) {
+            case 'H':
+                puts("help!");
+                exit(0);
 
-    if(rc != 0) {
-        fprintf(stderr, "libssh2 initialization failed (%d)\n", rc);
-        return 1;
-    }
- 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    hostaddr = inet_addr(hostname);
+            case 'h':
+                d->hostname = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->hostname == NULL) {
+                    return -1;
+                }
+                memcpy(d->hostname, optarg, strlen(optarg)+1);
+                break;
 
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(port);
-    sin.sin_addr.s_addr = hostaddr;
+            case 'p':
+                d->port = (int*)calloc(1, sizeof(int));
+                if (d->port == NULL) {
+                    return -1;
+                }
+                *d->port = atoi(optarg);
+                break;
 
-    if(connect(sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
-        fprintf(stderr, "failed to connect!\n");
-        return -1;
-    }
- 
-    /* Create a session instance */ 
-    session = libssh2_session_init();
-    if(!session) {
-        return -1;
-    }
- 
-    /* tell libssh2 we want it all done non-blocking */ 
-    libssh2_session_set_blocking(session, sock);
+            case 'u':
+                d->username = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->username == NULL) {
+                    return -1;
+                }
+                memcpy(d->username, optarg, strlen(optarg)+1);
+                break;
 
-    /* ... start it up. This will trade welcome banners, exchange keys,
-     * and setup crypto, compression, and MAC layers
-     */ 
-    while((rc = libssh2_session_handshake(session, sock)) == LIBSSH2_ERROR_EAGAIN);
-    if(rc) {
-        fprintf(stderr, "Failure establishing SSH session: %d\n", rc);
-        return -1;
-    }
- 
-    nh = libssh2_knownhost_init(session);
-    if(!nh) {
-        return 2;
-    }
- 
-    /* read all hosts from here */ 
-    libssh2_knownhost_readfile(nh, "known_hosts", LIBSSH2_KNOWNHOST_FILE_OPENSSH);
- 
-    /* store all known hosts to here */ 
-    libssh2_knownhost_writefile(nh, "dump-known_hosts", LIBSSH2_KNOWNHOST_FILE_OPENSSH);
- 
-    fingerprint = libssh2_session_hostkey(session, &len, &type);
+            case 'P':
+                d->password = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->password == NULL) {
+                    return -1;
+                }
+                memcpy(d->password, optarg, strlen(optarg)+1);
+                break;
 
-    if(!fingerprint) {
-        return 3;
-    }
-
-    /*****
-     * At this point, we could verify that 'check' tells us the key is
-     * fine or bail out.
-     *****/ 
-    struct libssh2_knownhost* host;
-#if LIBSSH2_VERSION_NUM >= 0x010206
-    /* introduced in 1.2.6 */ 
-    int check = libssh2_knownhost_checkp(nh, 
-                                          hostname, 
-                                          port, 
-                                          fingerprint, 
-                                          len,
-                                          LIBSSH2_KNOWNHOST_TYPE_PLAIN|
-                                          LIBSSH2_KNOWNHOST_KEYENC_RAW,
-                                          &host);
-#else
-    /* 1.2.5 or older */ 
-    int check = libssh2_knownhost_check(nh, 
-                                         hostname,
-                                         fingerprint, 
-                                         len,
-                                         LIBSSH2_KNOWNHOST_TYPE_PLAIN|
-                                         LIBSSH2_KNOWNHOST_KEYENC_RAW,
-                                         &host);
-#endif
-
-    fprintf(stderr, "Host check: %d, key: %s\n", check,
-            (check <= LIBSSH2_KNOWNHOST_CHECK_MISMATCH)?
-            host->key:"<none>");
-
-    libssh2_knownhost_free(nh);
-
-    /* authenticate via password */ 
-    while((rc = libssh2_userauth_password(session, 
-                    username, 
-                    password)) 
-            == LIBSSH2_ERROR_EAGAIN);
-
-    if(rc) {
-        fprintf(stderr, "Authentication by password failed.\n");
-        goto shutdown;
-    }
-
-
-    while(!(sftp_session = libssh2_sftp_init(session))) {
-        if(libssh2_session_last_errno(session) == LIBSSH2_ERROR_EAGAIN) {
-            puts("non-blocking init");
-            waitsocket(sock, session); /* now we wait */ 
-        } else {
-            fprintf(stderr, "Unable to init SFTP session\n");
-            goto shutdown;
+            default:
+                fprintf(stderr, "Error: Unknown character code %c\n", c);
+                return -1;
         }
     }
 
-    shell(session, sftp_session, sock);
- 
-shutdown:
-    libssh2_session_disconnect(session,"Normal Shutdown, Thank you for using");
-    libssh2_session_free(session);
-    close(sock);
-    libssh2_exit();
-    puts("all done");
     return 0;
 }
