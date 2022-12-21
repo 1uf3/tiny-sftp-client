@@ -204,9 +204,9 @@ shutdown:
     libssh2_session_free(session);
     close(sock);
     libssh2_exit();
-//     free(d->hostname);
-//     free(d->port);
-//     free(d->username);
+    free(d->hostname);
+    free(d->port);
+    free(d->username);
     free(d->password);
     free(d);
     puts("all done");
