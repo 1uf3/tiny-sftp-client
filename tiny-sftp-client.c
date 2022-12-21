@@ -216,11 +216,10 @@ shutdown:
 static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
 
     struct timeval timeout;
-    int rc;
+    int rc, dir;
     fd_set fd;
     fd_set* writefd = NULL;
     fd_set* readfd = NULL;
-    int dir;
  
     timeout.tv_sec = 10;
     timeout.tv_usec = 0;
@@ -254,7 +253,6 @@ int sdfilename(char* remote, char* local, char* type) {
         tmp[strlen(tmp)-1] = '\0';
     }
     memcpy(remote, tmp, sizeof(tmp));
-
     memset(tmp, 0, sizeof(tmp));
 
     printf("ssc %s > ENTER local filename : ", type);
@@ -356,7 +354,7 @@ int download_file(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock
 /* Upload a file via SFTP */ 
 int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
 
-    LIBSSH2_SFTP_HANDLE *sftp_handle; 
+    LIBSSH2_SFTP_HANDLE* sftp_handle; 
     char spath[MAX_PATH] = "/tmp";
     char dpath[MAX_PATH];
     FILE* fp;
@@ -386,8 +384,7 @@ int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
     char mem[1000];
     char* ptr;
     struct timeval timeout;
-    fd_set fd;
-    fd_set fd2;
+    fd_set fd, fd2;
 
     while ((nread = fread(mem, 1, sizeof(mem), fp)) > 0) {
         ptr = mem;
