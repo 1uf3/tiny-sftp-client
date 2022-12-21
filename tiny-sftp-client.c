@@ -246,6 +246,41 @@ int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
     return 0;
 }
  
+/* tiny shell
+ *
+ * need to prepare null byte and except other one.
+ * so take 5 byte
+ *
+ * want to upgrade this content for add any control.
+ */
+int shell(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock) {
+    char cmd[10];
+
+    while(fgets(cmd, sizeof(cmd), stdin) != NULL) {
+
+        if (sizeof(cmd)-1 <= strlen(cmd)) {
+            continue;
+        }
+
+        if (cmd[strlen(cmd)-1] == '\n') {
+            cmd[strlen(cmd)-1] = '\0';
+        }
+
+        if (strncmp(cmd, "DWN", 3) == 0 ) {
+            puts("DEBUG > downloading!");
+            download_file(session, sftp_session, sock);
+        }
+        if (strncmp(cmd, "UPD", 3) == 0 ) {
+            puts("DEBUG > uploading!");
+            upload_file(sftp_session, sock);
+        }
+        if (strncmp(cmd, "EXT", 3) == 0 ) {
+            return 0;
+        }
+        printf("ssc > ");
+        rewind(stdin);
+    }
+}
  
 int main(int argc, char** argv) {
 
@@ -392,42 +427,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* tiny shell 
-     *
-     * need to prepare null byte and except other one.
-     * so take 5 byte
-     */
-
-    /*
-     * want to upgrade this content for add any control.
-     */
-    char input[10];
-
-    while(fgets(input, sizeof(input), stdin) != NULL) {
-
-        if (sizeof(input)-1 <= strlen(input)) {
-            continue;
-        }
-
-        if (input[strlen(input)-1] == '\n') {
-            input[strlen(input)-1] = '\0';
-        }
-
-        if (strncmp(input, "DWN", 3) == 0 ) {
-            puts("DEBUG > downloading!");
-            download_file(session, sftp_session, sock);
-        }
-        if (strncmp(input, "UPD", 3) == 0 ) {
-            puts("DEBUG > uploading!");
-            upload_file(sftp_session, sock);
-        }
-        if (strncmp(input, "EXT", 3) == 0 ) {
-            goto shutdown;
-        }
-        printf("ssc > ");
-        rewind(stdin);
-    }
-
+    shell(session, sftp_session, sock);
  
 shutdown:
     libssh2_session_disconnect(session,"Normal Shutdown, Thank you for using");
