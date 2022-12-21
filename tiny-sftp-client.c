@@ -231,10 +231,10 @@ shutdown:
     libssh2_session_free(session);
     close(sock);
     libssh2_exit();
-    free(d->username);
+//     free(d->hostname);
+//     free(d->port);
+//     free(d->username);
     free(d->password);
-    free(d->port);
-    free(d->hostname);
     free(d);
     puts("all done");
     return 0;
@@ -245,10 +245,10 @@ void* initialize(data_t* d) {
     if(d == NULL) {
         return NULL;
     }
-    d->hostname = (char*)calloc(30, sizeof(char));
+    d->hostname = (char*)calloc(1, sizeof(char));
     d->port = (int*)calloc(1, sizeof(int));
-    d->username = (char*)calloc(30, sizeof(char));
-    d->password = (char*)calloc(30, sizeof(char));
+    d->username = (char*)calloc(1, sizeof(char));
+    d->password = (char*)calloc(1, sizeof(char));
     if(d->hostname == NULL || d->port == NULL || 
             d->username == NULL || d->password == NULL) {
         return NULL;
@@ -292,7 +292,6 @@ int sdfilename(char* remote, char* local, char* type) {
     char tmp[MAX_PATH];
 
     puts("remote file path need to write full path.");
-
     printf("ssc %s > ENTER remote filename : ", type);
     fgets(tmp, sizeof(tmp), stdin);
     if(tmp[strlen(tmp)-1] == '\n') {
@@ -507,7 +506,7 @@ char* input_password() {
         return NULL;
     }
 
-    memcpy(password, tmp, sizeof(tmp));
+    memcpy(password, tmp, strlen(tmp)+1);
 
     /* restore terminal */
     if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
