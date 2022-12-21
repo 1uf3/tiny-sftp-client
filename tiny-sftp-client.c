@@ -56,6 +56,7 @@ static struct option long_options[] = {
     {"port", required_argument, NULL, 'p'},
     {"username", required_argument, NULL, 'u'},
     {"password", optional_argument, NULL, 'P'},
+    {"help", optional_argument, NULL, 'H'},
     {NULL, 0, NULL, 0}
 };
 
@@ -87,7 +88,7 @@ int main(int argc, char** argv) {
         return -1;
     }
     if(parse_opts(&opts, argc, argv) == -1) {
-        puts("Try 'wc --help' for more information.");
+        puts("Try 'sftp --help' for more information.");
         return -1;
     }
 
@@ -116,9 +117,8 @@ int main(int argc, char** argv) {
     printf("username: %s\n",d->username);
     printf("password: %s\n",d->password);
     puts("=============");
- 
-    rc = libssh2_init(0);
 
+    rc = libssh2_init(0);
     if(rc != 0) {
         fprintf(stderr, "libssh2 initialization failed (%d)\n", rc);
         return 1;
@@ -566,6 +566,10 @@ int parse_opts(options* opts, int argc, char** argv) {
         }
 
         switch (c) {
+            case 'H':
+                puts("help!");
+                exit(0);
+
             case 'h':
                 opts->h = 1;
                 opts->hp = optarg;
