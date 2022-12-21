@@ -60,6 +60,51 @@ static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
     return rc;
 }
 
+/*
+ * password acceptable length max 256.
+ */
+char* input_password() {
+    struct termios oflags, nflags;
+    char tmp[256];
+
+    /* disabling echo */
+    tcgetattr(fileno(stdin), &oflags);
+    nflags = oflags;
+    nflags.c_lflag &= ~ECHO;
+    nflags.c_lflag |= ECHONL;
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("INPUT PASSWORD : ");
+    while(fgets(tmp, sizeof(tmp), stdin)) {
+        if (strlen(tmp) > 1) {
+            break;
+        }
+    }
+
+    if (tmp[strlen(tmp)-1] == '\n') {
+        tmp[strlen(tmp)-1] = '\0';
+    }
+
+    password = (char*)calloc(strlen(tmp)+1, sizeof(char));
+    if (password == NULL) {
+        return NULL;
+    }
+
+    memcpy(password, tmp, strlen(tmp)+1);
+
+    /* restore terminal */
+    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    return password;
+}
+
 /* 
  * get spath and dpath 
  */
@@ -318,6 +363,8 @@ int main(int argc, char** argv) {
             fprintf(stderr, "argument should have 1 to 5. now (%d)", argc);
             return 1;
     }
+
+    char* password = input_password()
  
     rc = libssh2_init(0);
 
