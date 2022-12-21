@@ -213,26 +213,6 @@ shutdown:
     return 0;
 }
 
-<<<<<<< HEAD
-void* initialize(data_t* d) {
-    d = (data_t*)calloc(1, sizeof(data_t));
-    if(d == NULL) {
-        return NULL;
-    }
-    d->hostname = (char*)calloc(1, sizeof(char));
-    d->port = (int*)calloc(1, sizeof(int));
-    d->username = (char*)calloc(1, sizeof(char));
-    d->password = (char*)calloc(1, sizeof(char));
-    if(d->hostname == NULL || d->port == NULL || 
-            d->username == NULL || d->password == NULL) {
-        return NULL;
-    }
-
-    return d;
-}
-
-=======
->>>>>>> e3a6e67 (動くコードになった)
 static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
 
     struct timeval timeout;
@@ -481,11 +461,7 @@ char* input_password(data_t* d) {
         return NULL;
     }
 
-<<<<<<< HEAD
-    memcpy(password, tmp, strlen(tmp)+1);
-=======
     memcpy(d->password, tmp, strlen(tmp)+1);
->>>>>>> e3a6e67 (動くコードになった)
 
     /* restore terminal */
     if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
