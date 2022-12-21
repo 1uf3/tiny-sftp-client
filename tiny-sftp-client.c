@@ -39,18 +39,6 @@ typedef struct {
     char* password;
 } data_t;
 
-typedef struct {
-	unsigned int h:1;	
-  char* hp;
-	unsigned int p:1;	
-  char *pp;
-	unsigned int u:1;	
-  char *up;
-	unsigned int P:1;	
-  char *Pp;
-	unsigned int no_option:1;
-} options;
-
 static struct option long_options[] = {
     {"hostname", required_argument, NULL, 'h'},
     {"port", required_argument, NULL, 'p'},
@@ -60,13 +48,12 @@ static struct option long_options[] = {
     {NULL, 0, NULL, 0}
 };
 
-void* initialize(data_t*);
-int parse_opts(options*, int, char**);
+int parse_opts(data_t*, int, char**);
 static int waitsocket(int, LIBSSH2_SESSION*);
 int sdfilename(char*, char*, char*);
 int download_file(LIBSSH2_SESSION*, LIBSSH2_SFTP*, int);
 int upload_file(LIBSSH2_SFTP*, int);
-char* input_password();
+char* input_password(data_t*);
 int shell(LIBSSH2_SESSION*, LIBSSH2_SFTP*, int);
 
 int main(int argc, char** argv) {
@@ -80,35 +67,21 @@ int main(int argc, char** argv) {
     int bytecount = 0;
     size_t len;
     data_t* d;
-    options opts = {};
 
-    d = (data_t*)initialize(d);
+    d = (data_t*)calloc(1, sizeof(data_t));
     if(d == NULL) {
-        fprintf(stderr, "Failed to malloc area\n");
+        fprintf(stderr, "Failed to malloc struct data_t area\n");
         return -1;
     }
-    if(parse_opts(&opts, argc, argv) == -1) {
+
+    if(parse_opts(d, argc, argv) == -1) {
         puts("Try 'sftp --help' for more information.");
         return -1;
     }
 
-    if(opts.h)
-        d->hostname = opts.hp;
-    if(opts.p)
-        *d->port = atoi(opts.pp);
-    if(opts.u)
-        d->username = opts.up;
-    if(opts.no_option) {
-        d->hostname = "127.0.0.1";
-        *d->port = 22;
-        d->username = "user";
-    }
-
     printf("Now you logging in : %s\n", d->username);
-    if(opts.P) {
-        d->password = opts.Pp;
-    } else {
-        d->password = input_password();
+    if(d->password == NULL) {
+        input_password(d);
     }
 
     puts("=== debug ===");
@@ -240,6 +213,7 @@ shutdown:
     return 0;
 }
 
+<<<<<<< HEAD
 void* initialize(data_t* d) {
     d = (data_t*)calloc(1, sizeof(data_t));
     if(d == NULL) {
@@ -257,6 +231,8 @@ void* initialize(data_t* d) {
     return d;
 }
 
+=======
+>>>>>>> e3a6e67 (動くコードになった)
 static int waitsocket(int socket_fd, LIBSSH2_SESSION* session) {
 
     struct timeval timeout;
@@ -474,10 +450,9 @@ int upload_file(LIBSSH2_SFTP* sftp_session, int sock) {
 /*
  * password acceptable length max 256.
  */
-char* input_password() {
+char* input_password(data_t* d) {
     struct termios oflags, nflags;
     char tmp[256];
-    char *password;
 
     /* disabling echo */
     tcgetattr(fileno(stdin), &oflags);
@@ -501,12 +476,16 @@ char* input_password() {
         tmp[strlen(tmp)-1] = '\0';
     }
 
-    password = (char*)calloc(strlen(tmp)+1, sizeof(char));
-    if (password == NULL) {
+    d->password = (char*)calloc(strlen(tmp)+1, sizeof(char));
+    if (d->password == NULL) {
         return NULL;
     }
 
+<<<<<<< HEAD
     memcpy(password, tmp, strlen(tmp)+1);
+=======
+    memcpy(d->password, tmp, strlen(tmp)+1);
+>>>>>>> e3a6e67 (動くコードになった)
 
     /* restore terminal */
     if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
@@ -514,7 +493,7 @@ char* input_password() {
         exit(-1);
     }
 
-    return password;
+    return d->password;
 }
 
 /* tiny shell 
@@ -553,7 +532,7 @@ int shell(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp_session, int sock) {
     }
 }
 
-int parse_opts(options* opts, int argc, char** argv) {
+int parse_opts(data_t* d, int argc, char** argv) {
     int c, option_index;
 
     while (1) {
@@ -570,33 +549,41 @@ int parse_opts(options* opts, int argc, char** argv) {
                 exit(0);
 
             case 'h':
-                opts->h = 1;
-                opts->hp = optarg;
+                d->hostname = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->hostname == NULL) {
+                    return -1;
+                }
+                memcpy(d->hostname, optarg, strlen(optarg)+1);
                 break;
 
             case 'p':
-                opts->p = 1;
-                opts->pp = optarg;
+                d->port = (int*)calloc(1, sizeof(int));
+                if (d->port == NULL) {
+                    return -1;
+                }
+                *d->port = atoi(optarg);
                 break;
 
             case 'u':
-                opts->u = 1;
-                opts->up = optarg;
+                d->username = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->username == NULL) {
+                    return -1;
+                }
+                memcpy(d->username, optarg, strlen(optarg)+1);
                 break;
 
             case 'P':
-                opts->P = 1;
-                opts->Pp = optarg;
+                d->password = (char*)calloc(strlen(optarg)+1, sizeof(char));
+                if (d->password == NULL) {
+                    return -1;
+                }
+                memcpy(d->password, optarg, strlen(optarg)+1);
                 break;
 
             default:
                 fprintf(stderr, "Error: Unknown character code %c\n", c);
                 return -1;
         }
-    }
-
-    if(!opts->h && !opts->p && !opts->u && !opts->P) {
-        opts->no_option = 1;
     }
 
     return 0;
